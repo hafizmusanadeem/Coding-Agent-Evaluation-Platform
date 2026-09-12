@@ -1,0 +1,50 @@
+id: task_002
+
+repository: pydantic-ai
+
+base_commit: "edcb123c1dd085129c0db1b40904b374da04b663"
+# gold fix commit (do not expose to the agent): e958cdc2e7152ced3b3ed7cd9b0c96218db476f3
+# source PR: https://github.com/pydantic/pydantic-ai/pull/8081
+
+title: "DeferredToolResults.approvals silently accepts non-bool/non-approval values"
+
+description: |
+  `DeferredToolResults.approvals` is typed as
+  `dict[str, bool | DeferredToolApprovalResult]`, but nothing enforces that
+  at runtime: a value that is neither a `bool` nor a `ToolApproved`/
+  `ToolDenied` instance (e.g. `None`, the string `"yes"`) passes straight
+  through the resolution logic and the tool call is silently treated as
+  neither approved nor denied — it just never executes, with no error
+  telling the caller why.
+
+  Make invalid approval values raise clearly:
+  - At the dataclass-processing level (`DeferredToolResults.tool_call_results`
+    or equivalent), raise `UserError` naming the offending tool call id.
+  - At the pydantic-validation level (`TypeAdapter(DeferredToolResults).validate_python(...)`),
+    a bad `approvals` value should raise `pydantic.ValidationError` rather
+    than being coerced.
+
+category: bug_fix
+difficulty: easy
+
+setup:
+  # Same principle as task_001: this file has no VCR/cassette dependency
+  # for the new tests (docstring literally says "Not a VCR test"), so a
+  # minimal install is enough.
+  command: |
+    pip install -e ./pydantic_graph -e "./pydantic_ai_slim" \
+      pytest anyio inline-snapshot dirty-equals httpx asgi-lifespan \
+      pytest-mock pytest-recording devtools
+  env:
+    BLOCKBUSTER_ENABLED: "false"
+
+tests:
+  fail_to_pass:
+    - "tests/test_tools.py::test_invalid_deferred_tool_approval_does_not_execute[None]"
+    - "tests/test_tools.py::test_invalid_deferred_tool_approval_does_not_execute[yes]"
+    - "tests/test_tools.py::test_deferred_tool_results_does_not_coerce_approval"
+
+  pass_to_pass:
+    - "tests/test_tools.py"   # full file, 161 passed + 1 skipped on base_commit, must hold
+
+timeout_seconds: 900
